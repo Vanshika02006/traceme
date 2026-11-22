@@ -11,7 +11,11 @@ import { mapLimit } from './http.js';
 export const MAX_INPUTS = 5;
 const key = (platform, username) => `${platform}:${String(username).toLowerCase().replace(/\.bsky\.social$/, '')}`;
 
-export async function analyze({ inputs = [], fullName = '', location = '' }) {
+/**
+ * @param {{inputs: string[], fullName?: string, location?: string}} query
+ * @param {{onProgress?: (e: {stage: string, done?: number, total?: number, result?: object}) => void}} [opts]
+ */
+export async function analyze({ inputs = [], fullName = '', location = '' }, { onProgress = () => {} } = {}) {
   const parsed = inputs.slice(0, MAX_INPUTS).map((raw) => ({ raw, parsed: parseInput(raw) }));
   const invalid = parsed.filter((p) => !p.parsed).map((p) => p.raw);
   const valid = parsed.map((p) => p.parsed).filter(Boolean);
@@ -38,7 +42,14 @@ export async function analyze({ inputs = [], fullName = '', location = '' }) {
     if (!seen.has(k)) { seen.add(k); tasks.push({ pid: v.platform, u: v.username, via: null }); }
   });
 
-  const results = await mapLimit(tasks, 10, async (t) => ({ ...(await lookup(t.pid, t.u)), via: t.via }));
+  let done = 0;
+  const run = (stage, total) => async (t) => {
+    const r = { ...(await lookup(t.pid, t.u)), via: t.via };
+    onProgress({ stage, done: ++done, total, result: { platform: r.platform, platformName: r.platformName, status: r.status, query: r.query } });
+    return r;
+  };
+  onProgress({ stage: 'discover', done: 0, total: tasks.length });
+  const results = await mapLimit(tasks, 8, run('discover', tasks.length));
 
   // 2. Follow account links found in profiles (one hop).
   const hop = [];
@@ -53,7 +64,10 @@ export async function analyze({ inputs = [], fullName = '', location = '' }) {
       }
     }
   }
-  const hopResults = await mapLimit(hop.slice(0, 10), 6, async (t) => ({ ...(await lookup(t.pid, t.u)), via: t.via }));
+  const hopTasks = hop.slice(0, 10);
+  done = 0;
+  onProgress({ stage: 'links', done: 0, total: hopTasks.length });
+  const hopResults = await mapLimit(hopTasks, 6, run('links', hopTasks.length));
   const all = [...results, ...hopResults];
 
   // 3. Normalise found profiles.
@@ -67,9 +81,11 @@ export async function analyze({ inputs = [], fullName = '', location = '' }) {
   const claimedIds = new Set(profiles.filter((p) => claimed.has(p.id)).map((p) => p.id));
 
   // 4. NLP entity extraction.
+  onProgress({ stage: 'extract' });
   const entities = mergeEntities(profiles.flatMap(extractEntities));
 
   // 5. Identity matching.
+  onProgress({ stage: 'match' });
   const matching = matchIdentities(profiles, claimedIds, { fullName: fullName.trim(), location: location.trim() });
 
   // 6. Activity analysis (most confident GitHub profile).
@@ -77,6 +93,7 @@ export async function analyze({ inputs = [], fullName = '', location = '' }) {
   const activity = gh?.activity?.length ? analyzeActivity(gh.activity) : null;
 
   // 7. Risk classification.
+  onProgress({ stage: 'risk' });
   const risk = classifyRisk({ profiles, entities, matching, activity });
 
   return {

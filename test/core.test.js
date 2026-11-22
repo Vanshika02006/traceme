@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseInput, parseProfileUrl } from '../src/urlParser.js';
-import { extractEntities, mergeEntities, classifyLocation, looksLikeRealName } from '../src/nlp.js';
-import { jaroWinkler, nameSimilarity, matchIdentities } from '../src/matching.js';
-import { classifyRisk } from '../src/risk.js';
-import { analyzeActivity } from '../src/activity.js';
+import { parseInput, parseProfileUrl } from '../public/js/core/urlParser.js';
+import { extractEntities, mergeEntities, classifyLocation, looksLikeRealName } from '../public/js/core/nlp.js';
+import { jaroWinkler, nameSimilarity, matchIdentities } from '../public/js/core/matching.js';
+import { classifyRisk } from '../public/js/core/risk.js';
+import { analyzeActivity } from '../public/js/core/activity.js';
 
 const mk = (o) => ({ displayName: null, bio: null, location: null, company: null, website: null, emails: [], links: [], extraText: [], ...o, id: `${o.platform}:${o.username}`, platformName: o.platform });
 

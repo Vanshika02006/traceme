@@ -1,4 +1,7 @@
 // TraceMe front end — no framework, no inline styles/scripts (strict CSP).
+// The whole scan runs in the browser (static hosting on GitHub Pages).
+import { PLATFORMS as PLATFORM_DEFS } from './core/platforms.js';
+import { MAX_INPUTS as MAX } from './core/analyze.js';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -98,12 +101,10 @@ $('#chip-input').addEventListener('click', (e) => {
 function showError(msg) { const el = $('#form-error'); el.textContent = msg; el.hidden = !msg; }
 
 // ---------------- scan flow ----------------
-fetch('/api/platforms').then((r) => r.json()).then((d) => {
-  PLATFORMS = d.platforms;
-  MAX_INPUTS = d.maxInputs;
-  $('#max-inputs').textContent = MAX_INPUTS;
-  $('#platform-ticker').innerHTML = PLATFORMS.map((p) => `<li>${esc(p.name)}</li>`).join('');
-}).catch(() => {});
+PLATFORMS = Object.entries(PLATFORM_DEFS).map(([id, p]) => ({ id, name: p.name }));
+MAX_INPUTS = MAX;
+$('#max-inputs').textContent = MAX_INPUTS;
+$('#platform-ticker').innerHTML = PLATFORMS.map((p) => `<li>${esc(p.name)}</li>`).join('');
 
 let scanTimers = [];
 function startScanAnimation() {
@@ -137,13 +138,8 @@ $('#scan-form').addEventListener('submit', async (e) => {
   scrollTo({ top: 0 });
   startScanAnimation();
   try {
-    const res = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs, fullName: $('#full-name').value, location: $('#location').value, consent: true }),
-    });
-    const data = await res.json().catch(() => ({ error: 'Unexpected response from the server.' }));
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    const { analyze } = await import('./core/analyze.js');
+    const data = await analyze({ inputs, fullName: $('#full-name').value, location: $('#location').value });
     lastReport = data;
     render(data);
     $('#scanning').hidden = true;

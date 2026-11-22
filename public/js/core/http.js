@@ -1,13 +1,16 @@
-const UA = 'TraceMe/1.0 (self-audit privacy tool)';
-
 export class NotFound extends Error {}
 
-/** GET JSON with a timeout. Returns parsed body, throws NotFound on 404/410, Error otherwise. */
+/**
+ * GET JSON with a timeout. Returns parsed body, throws NotFound on 404/410, Error otherwise.
+ * Runs in the browser: only CORS-safelisted headers are sent so no preflight is needed.
+ */
 export async function getJson(url, { timeout = 7000, headers = {}, notFoundStatuses = [404, 410] } = {}) {
   const res = await fetch(url, {
-    headers: { 'User-Agent': UA, Accept: 'application/json', ...headers },
+    headers: { Accept: 'application/json', ...headers },
     signal: AbortSignal.timeout(timeout),
     redirect: 'follow',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
   });
   if (notFoundStatuses.includes(res.status)) throw new NotFound(`${res.status}`);
   if (!res.ok) {

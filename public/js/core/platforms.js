@@ -1,5 +1,6 @@
 // Public-data connectors. Each one uses an official/public JSON endpoint that
-// requires no login. A fetcher returns a normalised profile or throws NotFound.
+// requires no login and allows cross-origin requests (the app runs entirely in
+// the browser on GitHub Pages). A fetcher returns a normalised profile or throws NotFound.
 import { getJson, NotFound, stripHtml } from './http.js';
 
 const enc = encodeURIComponent;
@@ -20,8 +21,8 @@ function profile(base) {
   };
 }
 
-const githubHeaders = () =>
-  process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+// Unauthenticated: GitHub allows 60 requests/hour per visitor IP.
+const githubHeaders = () => ({});
 
 export const PLATFORMS = {
   github: {
@@ -182,19 +183,6 @@ export const PLATFORMS = {
     },
   },
 
-  dockerhub: {
-    name: 'Docker Hub',
-    profileUrl: (u) => `https://hub.docker.com/u/${u}`,
-    async fetch(u) {
-      const d = await getJson(`https://hub.docker.com/v2/users/${enc(u)}/`);
-      return profile({
-        username: d.username, url: `https://hub.docker.com/u/${d.username}`, displayName: d.full_name || null,
-        location: d.location || null, company: d.company || null, website: d.profile_url || null,
-        links: [d.profile_url], avatar: d.gravatar_url || null, createdAt: toIso(d.date_joined),
-      });
-    },
-  },
-
   npm: {
     name: 'npm',
     profileUrl: (u) => `https://www.npmjs.com/~${u}`,
@@ -209,38 +197,6 @@ export const PLATFORMS = {
         links: mine.map((p) => p.links?.repository).filter(Boolean).slice(0, 10),
         extraText: mine.map((p) => p.description).filter(Boolean).slice(0, 10),
         stats: { packages: mine.length },
-      });
-    },
-  },
-
-  reddit: {
-    name: 'Reddit',
-    profileUrl: (u) => `https://www.reddit.com/user/${u}`,
-    async fetch(u) {
-      const d = await getJson(`https://www.reddit.com/user/${enc(u)}/about.json`);
-      const r = d.data;
-      if (!r || r.is_suspended) throw new NotFound();
-      return profile({
-        username: r.name, url: `https://www.reddit.com/user/${r.name}`,
-        displayName: r.subreddit?.title || null, bio: r.subreddit?.public_description || null,
-        avatar: r.icon_img?.split('?')[0] || null, createdAt: toIso(r.created_utc),
-        stats: { karma: r.total_karma },
-      });
-    },
-  },
-
-  duolingo: {
-    name: 'Duolingo',
-    profileUrl: (u) => `https://www.duolingo.com/profile/${u}`,
-    async fetch(u) {
-      const d = await getJson(`https://www.duolingo.com/2017-06-30/users?username=${enc(u)}&fields=users{username,name,bio,creationDate,streak,courses{title}}`);
-      const r = d.users?.[0];
-      if (!r) throw new NotFound();
-      return profile({
-        username: r.username, url: `https://www.duolingo.com/profile/${r.username}`, displayName: r.name || null,
-        bio: r.bio || null, createdAt: toIso(r.creationDate),
-        extraText: r.courses?.length ? [`Learning: ${r.courses.map((c) => c.title).join(', ')}`] : [],
-        stats: { streak: r.streak },
       });
     },
   },
@@ -260,8 +216,12 @@ export const PLATFORMS = {
   },
 };
 
-// Platforms we recognise from URLs but never fetch (login walls / scraping prohibited).
+// Platforms we recognise from URLs but never fetch: login walls, scraping
+// prohibited, or no CORS support for a browser-only app.
 export const DECLARED_ONLY = {
+  reddit: { name: 'Reddit', profileUrl: (u) => `https://www.reddit.com/user/${u}` },
+  dockerhub: { name: 'Docker Hub', profileUrl: (u) => `https://hub.docker.com/u/${u}` },
+  duolingo: { name: 'Duolingo', profileUrl: (u) => `https://www.duolingo.com/profile/${u}` },
   twitter: { name: 'X (Twitter)', profileUrl: (u) => `https://x.com/${u}` },
   instagram: { name: 'Instagram', profileUrl: (u) => `https://instagram.com/${u}` },
   linkedin: { name: 'LinkedIn', profileUrl: (u) => `https://linkedin.com/in/${u}` },
@@ -286,7 +246,9 @@ export async function lookup(platformId, username) {
     return { ...base, status: 'found', profile: { platform: platformId, platformName: p.name, ...data } };
   } catch (e) {
     if (e instanceof NotFound) return { ...base, status: 'not_found' };
-    const reason = e.status === 429 || e.status === 403 ? 'rate-limited or blocked' : e.name === 'TimeoutError' ? 'timed out' : e.message;
+    const reason = e.status === 429 || e.status === 403 ? 'rate-limited or blocked'
+      : e.name === 'TimeoutError' ? 'timed out'
+      : e.name === 'TypeError' ? 'blocked by the browser or offline' : e.message;
     return { ...base, status: 'unknown', reason, checkUrl: p.profileUrl(username) };
   }
 }
