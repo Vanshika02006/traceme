@@ -16,9 +16,11 @@ export const THREATS = {
 const RULES = {
   phone: { severity: 'critical', threats: ['doxxing', 'phishing', 'account_takeover'], title: 'Phone number exposed', rec: 'Remove the number from public profiles. Phone numbers enable SIM-swap attacks, SMS phishing and reverse lookups. Use an authenticator app instead of SMS 2FA.' },
   address: { severity: 'critical', threats: ['doxxing', 'stalking', 'identity_theft'], title: 'Street address exposed', rec: 'Remove the street address immediately. Use only a city or region, or nothing at all.' },
+  commit_email: { severity: 'high', threats: ['phishing', 'account_takeover'], title: 'Email address exposed in your public git commits', rec: 'Anyone can read the author email of every public commit. On GitHub, go to Settings → Emails and turn on "Keep my email addresses private" and "Block command line pushes that expose my email". Then run git config --global user.email "<ID>+<username>@users.noreply.github.com" (your exact noreply address is shown on that page). Old commits keep the old email unless you rewrite the history, so also make sure this inbox has a strong unique password and 2FA.' },
   email: { severity: 'high', threats: ['phishing', 'account_takeover'], title: 'Email address exposed', rec: 'Hide the email or replace it with a forwarding alias (e.g. a GitHub noreply address, SimpleLogin, Firefox Relay). Check it on haveibeenpwned.com and make sure it has a unique password and 2FA.' },
   birthdate: { severity: 'high', threats: ['identity_theft', 'account_takeover'], title: 'Birth date disclosed', rec: 'Birth dates are a common security question and identity-verification field. Remove them from public bios.' },
   travel: { severity: 'high', threats: ['stalking', 'phishing'], title: 'Travel plans or absence disclosed', rec: 'Announcing when you are away tells people when your home is empty and gives scammers a convincing pretext. Post about trips after you return.' },
+  first_name: { severity: 'low', threats: ['phishing'], title: 'First name visible and built into your username', rec: 'Your first name alone is low risk, but a username made from it is easy to guess and search. Combined with an email or location it makes you easier to find and to address convincingly in scam messages.' },
   name: { severity: 'medium', threats: ['doxxing', 'identity_theft', 'phishing'], title: 'Real name linked to username', rec: 'Consider using a pseudonym on hobby or community platforms so they cannot be tied to your legal identity.' },
   location_city: { severity: 'medium', threats: ['doxxing', 'stalking'], title: 'City-level location exposed', rec: 'Use a broader region (country or "Earth") unless the location is needed professionally.' },
   location_country: { severity: 'low', threats: ['doxxing'], title: 'Country exposed', rec: 'Low risk on its own, but it narrows down searches when combined with other details.' },
@@ -56,6 +58,8 @@ export function classifyRisk({ profiles, entities, matching, activity }) {
     let key = e.type;
     if (e.type === 'location') key = e.subtype === 'country' ? 'location_country' : e.subtype === 'address' ? 'address' : 'location_city';
     if (e.type === 'sensitive') key = `sensitive_${e.subtype}`;
+    if (e.type === 'name' && e.subtype === 'first name') key = 'first_name';
+    if (e.type === 'email' && e.sources.some((src) => src.field === 'commit author email')) key = 'commit_email';
     if (!RULES[key] && !key.startsWith('sensitive_')) continue;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(e);

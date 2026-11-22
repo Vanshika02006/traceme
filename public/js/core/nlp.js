@@ -101,6 +101,13 @@ export function looksLikeRealName(name) {
   return nlp(n).people().found && n.split(/\s+/).length >= 2;
 }
 
+/** A single capitalised word that is a known first name, or that the username is built from. */
+export function looksLikeFirstName(name, username = '') {
+  const n = String(name || '').trim();
+  if (!/^\p{Lu}\p{Ll}{2,14}$/u.test(n)) return false;
+  return String(username).toLowerCase().startsWith(n.toLowerCase()) || nlp(n).has('#FirstName');
+}
+
 /**
  * Extract entities from one normalised profile.
  * @returns {Array<{type, value, subtype?, field, snippet, platform}>}
@@ -117,16 +124,28 @@ export function extractEntities(p) {
 
   // Structured fields first — these are explicit disclosures.
   if (p.displayName && looksLikeRealName(p.displayName)) add('name', p.displayName, 'display name');
+  else if (p.displayName && looksLikeFirstName(p.displayName, p.username)) {
+    add('name', p.displayName.trim(), 'display name', `Display name “${p.displayName.trim()}” on @${p.username}`, 'first name');
+  }
   if (p.location) {
     const kind = classifyLocation(p.location);
     add(kind === 'address' ? 'address' : 'location', p.location, 'location field', p.location, kind);
   }
   if (p.company) add('organization', p.company.replace(/^@/, ''), 'company field');
-  for (const e of p.emails) add('email', e.toLowerCase(), 'public email field');
+  for (const e of p.emails) {
+    const src = p.emailFields?.[e.toLowerCase()] || p.emailFields?.[e];
+    add('email', e.toLowerCase(), src?.field || 'public email field', src?.snippet);
+  }
+  // Structured extras from connectors (commit authors, organisations, ...).
+  for (const x of p.extraEntities || []) {
+    if (x.type === 'commit_name') {
+      if (looksLikeRealName(x.value)) add('name', x.value, x.field, x.snippet);
+    } else add(x.type, x.value, x.field, x.snippet, x.subtype);
+  }
   if (p.website) add('url', p.website, 'website field');
 
   // Free text: bio + extra fields.
-  const texts = [['bio', p.bio], ...p.extraText.map((t) => ['profile fields', t])].filter(([, t]) => t);
+  const texts = [['bio', p.bio], ['profile README', p.readme], ...p.extraText.map((t) => ['profile fields', t])].filter(([, t]) => t);
   for (const [field, raw] of texts) {
     const text = String(raw);
 
@@ -160,8 +179,8 @@ export function extractEntities(p) {
     }
 
     // Statistical NER (compromise) for places / organisations the patterns missed.
-    // Only on free-form bios: structured fields and package descriptions produce noise.
-    if (field !== 'bio') continue;
+    // Only on free-form text you wrote (bio, profile README): structured fields and package descriptions produce noise.
+    if (field !== 'bio' && field !== 'profile README') continue;
     const doc = nlp(text);
     for (const place of doc.places().out('array')) {
       const v = trimPunct(place);

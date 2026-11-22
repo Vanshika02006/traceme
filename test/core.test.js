@@ -105,3 +105,50 @@ test('activity: quiet window infers timezone', () => {
   assert.ok(a.inferred);
   assert.equal(a.histogramUtc[3], 0);
 });
+
+test('commit emails, commit author names, orgs and README text become entities', () => {
+  const ents = extractEntities(mk({
+    platform: 'github', username: 'jdoe',
+    emails: ['jane@example.com'],
+    emailFields: { 'jane@example.com': { field: 'commit author email', snippet: 'Author of commits in jdoe/app' } },
+    extraEntities: [
+      { type: 'commit_name', value: 'Jane Doe', field: 'commit author name', snippet: 'x' },
+      { type: 'commit_name', value: 'jdoe123', field: 'commit author name', snippet: 'x' },
+      { type: 'organization', value: 'acme-labs', field: 'GitHub organisation', snippet: 'x' },
+    ],
+    readme: "Hi, I'm Jane. Student at Stanford University. Reach me at jane.doe@uni.edu",
+  }));
+  const email = ents.find((e) => e.value === 'jane@example.com');
+  assert.equal(email.field, 'commit author email');
+  assert.ok(ents.some((e) => e.type === 'name' && e.value === 'Jane Doe'));
+  assert.ok(!ents.some((e) => e.value === 'jdoe123'), 'handles are not real names');
+  assert.ok(ents.some((e) => e.type === 'organization' && e.value === 'acme-labs'));
+  assert.ok(ents.some((e) => e.type === 'email' && e.value === 'jane.doe@uni.edu' && e.field === 'profile README'));
+  assert.ok(ents.some((e) => e.type === 'education' && /Stanford/.test(e.value)));
+});
+
+test('risk: commit email gets its own finding with the GitHub fix', () => {
+  const gh = mk({ platform: 'github', username: 'v' });
+  const r = classifyRisk({
+    profiles: [gh],
+    entities: [{ type: 'email', value: 'a@gmail.com', sources: [{ platform: 'github', field: 'commit author email', snippet: '' }] }],
+    matching: { confidence: { [gh.id]: { score: 1 } }, edges: [], clusters: [] }, activity: null,
+  });
+  const f = r.findings.find((x) => x.type === 'commit_email');
+  assert.equal(f.severity, 'high');
+  assert.match(f.recommendation, /Keep my email addresses private/);
+});
+
+test('matching: Gravatar found by email hash links strongly to the source account', () => {
+  const gh = mk({ platform: 'github', username: 'v', emails: ['a@gmail.com'], origin: 'input' });
+  const gr = mk({ platform: 'gravatar', username: 'vee', emails: ['a@gmail.com'], origin: 'email-hash' });
+  const m = matchIdentities([gh, gr], new Set([gh.id]));
+  assert.ok(m.confidence[gr.id].score >= 0.9, `gravatar ${m.confidence[gr.id].score}`);
+});
+
+test('a single-word display name that the username is built from counts as a first name', () => {
+  const ents = extractEntities(mk({ platform: 'github', username: 'Vanshika02006', displayName: 'Vanshika' }));
+  assert.ok(ents.some((e) => e.type === 'name' && e.subtype === 'first name' && e.value === 'Vanshika'));
+  const none = extractEntities(mk({ platform: 'github', username: 'zz_top', displayName: 'Blurb' }));
+  assert.ok(!none.some((e) => e.type === 'name'));
+});

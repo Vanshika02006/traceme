@@ -185,8 +185,15 @@ export function matchIdentities(profiles, claimedIds = new Set(), seed = {}) {
       confidence[p.id] = { score: 1, label: 'You (provided)', reasons: ['You entered this profile URL'] };
       return;
     }
-    const reasons = ['Matches a username you entered'];
-    const weights = [0.3];
+    // Prior: how the account was discovered.
+    const prior = {
+      input: [0.3, 'Matches a username you entered'],
+      link: [0.3, `Discovered via a link (${p.via || 'profile'})`],
+      email: [0.4, `Username is the ${p.via || 'name part of your email'}`],
+      'email-hash': [0.3, 'Registered to an email address found on your profiles'],
+    }[p.origin] || [0.3, 'Matches a username you entered'];
+    const reasons = [prior[1]];
+    const weights = [prior[0]];
     let bestClaimed = 0, bestClaimedWhy = null, bestOther = 0, bestOtherWhy = null;
     const conflicts = [];
     profiles.forEach((q, j) => {

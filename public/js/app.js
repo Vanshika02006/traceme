@@ -165,15 +165,17 @@ function setProgress(p) {
   bar.firstElementChild.style.width = `${Math.round(p * 100)}%`;
   bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
 }
-const STAGES = ['discover', 'links', 'extract', 'match', 'risk'];
-const STAGE_TEXT = { discover: 'Checking public profiles', links: 'Following links between your profiles', extract: 'Extracting personal details with NLP', match: 'Matching identities across accounts', risk: 'Classifying risk' };
+const STAGES = ['discover', 'links', 'pivot', 'extract', 'match', 'risk'];
+const STAGE_TEXT = { discover: 'Checking public profiles', links: 'Following links between your profiles', pivot: 'Checking discovered emails: Gravatar and reused usernames', extract: 'Extracting personal details with NLP', match: 'Matching identities across accounts', risk: 'Classifying risk' };
 function onProgress(ev) {
   const i = STAGES.indexOf(ev.stage);
   $$('.pipeline li').forEach((li, k) => { li.classList.toggle('done', k < i); li.classList.toggle('active', k === i); });
   $('#scan-status').textContent = STAGE_TEXT[ev.stage] || '';
-  if (ev.stage === 'discover' && ev.total) setProgress(0.75 * (ev.done / ev.total));
-  else if (ev.stage === 'links') setProgress(0.75 + 0.1 * (ev.total ? ev.done / ev.total : 1));
-  else if (i >= 2) setProgress(0.85 + 0.05 * (i - 1));
+  const frac = ev.total ? ev.done / ev.total : 1;
+  if (ev.stage === 'discover') setProgress(0.6 * frac);
+  else if (ev.stage === 'links') setProgress(0.6 + 0.1 * frac);
+  else if (ev.stage === 'pivot') setProgress(0.7 + 0.15 * frac);
+  else if (i >= 3) setProgress(0.85 + 0.05 * (i - 2));
   const r = ev.result;
   if (r) {
     let li = $(`#platform-status [data-platform="${r.platform}"]`);
@@ -202,7 +204,8 @@ $('#scan-form').addEventListener('submit', async (e) => {
   resetScanUI();
   showView('scan');
   try {
-    const { analyze } = await import('./core/analyze.js');
+    const [{ analyze }, { setGithubToken }] = await Promise.all([import('./core/analyze.js'), import('./core/platforms.js')]);
+    setGithubToken($('#gh-token').value);
     const data = await analyze({ inputs, fullName: $('#full-name').value, location: $('#location').value }, { onProgress });
     setProgress(1);
     lastReport = data;
@@ -244,6 +247,7 @@ function render(r) {
   $('#report-meta').textContent = `${r.summary.lookups} lookups across ${r.summary.platformsChecked} platforms · ${new Date(r.generatedAt).toLocaleString()}`
     + (r.query.invalid.length ? ` · Skipped unrecognised input: ${r.query.invalid.join(', ')}` : '');
 
+  renderCoverage(r);
   renderScore(r);
   renderStats(r);
   renderThreats(r.risk.threats);
@@ -254,6 +258,21 @@ function render(r) {
   renderActivity(r.activity);
   $$('#results .reveal').forEach((el) => el.classList.remove('in'));
   requestAnimationFrame(() => observeReveals($('#results')));
+}
+
+function renderCoverage(r) {
+  const s = r.summary, q = r.query;
+  const parts = [
+    `<strong>${s.lookups}</strong> lookups for ${q.usernames.map((u) => `<span class="mono">@${esc(u)}</span>`).join(', ')} across ${s.platformsChecked} platforms`,
+    q.emailsChecked ? `<strong>${q.emailsChecked}</strong> email${q.emailsChecked === 1 ? '' : 's'} checked on Gravatar` : null,
+    q.pivotUsernames?.length ? `reused-handle search for ${q.pivotUsernames.map((u) => `<span class="mono">@${esc(u)}</span>`).join(', ')}` : null,
+  ].filter(Boolean);
+  const few = s.accountsFound <= 2;
+  const limited = r.unknown.find((u) => u.platform === 'github' && /rate limit/.test(u.reason || ''));
+  $('#coverage').innerHTML = `<div class="coverage-row">${statusChip(few ? 'neutral' : 'good', few ? 'Small footprint' : 'Scan complete')}<p>${parts.join(' · ')}.</p></div>
+    ${few ? '<p class="muted">Only a few public accounts were found. TraceMe can only see platforms with open APIs. To widen the search, add the other usernames you use (Instagram, gaming or forum handles) or paste your profile links. LinkedIn, Instagram and X links are recorded as linked accounts even though they can\'t be read.</p>' : ''}
+    ${s.unknown ? `<p class="muted">${s.unknown} check${s.unknown === 1 ? '' : 's'} couldn't complete (see "Couldn't check automatically" under Accounts).</p>` : ''}
+    ${limited ? `<p class="limit-warn">${statusChip('serious', 'Incomplete')} GitHub's hourly limit was reached (${esc(limited.reason)}), so GitHub details are missing. Wait for the reset, or add a GitHub token under "Optional" and scan again.</p>` : ''}`;
 }
 
 function countUp(el, to, ms = 1100) {

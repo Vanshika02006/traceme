@@ -7,7 +7,7 @@
   <meta name="description" content="Enter your public usernames or profile URLs to see your digital footprint, privacy exposure and potential risks. Runs entirely in your browser.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#07080b" id="theme-color">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'sha256-6HgX19uhVrl+9xGmxi8xQlCipAdVXtxEFNLKHaWPKKo='; style-src 'self'; img-src 'self' https: data:; connect-src 'self' https://api.github.com https://gitlab.com https://hacker-news.firebaseio.com https://dev.to https://keybase.io https://api.chess.com https://lichess.org https://codeforces.com https://mastodon.social https://public.api.bsky.app https://registry.npmjs.org https://en.wikipedia.org; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'sha256-6HgX19uhVrl+9xGmxi8xQlCipAdVXtxEFNLKHaWPKKo='; style-src 'self'; img-src 'self' https: data:; connect-src 'self' https://api.github.com https://gitlab.com https://hacker-news.firebaseio.com https://dev.to https://keybase.io https://api.chess.com https://lichess.org https://codeforces.com https://mastodon.social https://public.api.bsky.app https://registry.npmjs.org https://en.wikipedia.org https://api.gravatar.com; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta property="og:title" content="TraceMe – Your Digital Footprint Investigator">
   <meta property="og:description" content="See what the internet knows about you: public accounts, exposed personal data, linkability and risk.">
@@ -80,6 +80,9 @@
             </div>
           </div>
           <p class="help">Only used on this device to check which accounts are really you.</p>
+          <label class="field-label token-label" for="gh-token">GitHub token <span class="muted small">(optional)</span></label>
+          <input id="gh-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_… or ghp_…">
+          <p class="help">GitHub allows 60 lookups an hour without one (one scan uses about 10). A token with <strong>no scopes</strong> raises that to 5,000. <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">Create one</a>. It stays in this tab only and is sent only to api.github.com.</p>
         </details>
 
         <label class="consent">
@@ -109,6 +112,7 @@
         <ol class="pipeline">
           <li data-stage="discover">Discover accounts</li>
           <li data-stage="links">Follow links</li>
+          <li data-stage="pivot">Pivot on emails</li>
           <li data-stage="extract">Extract entities</li>
           <li data-stage="match">Match identities</li>
           <li data-stage="risk">Classify risk</li>
@@ -140,6 +144,8 @@
         <a href="#sec-graph">Identity graph</a>
         <a href="#sec-activity">Activity</a>
       </nav>
+
+      <div class="glass coverage reveal" id="coverage"></div>
 
       <section id="sec-overview" class="overview">
         <div class="glass score-card reveal" id="score-card"></div>
@@ -197,7 +203,7 @@
     <section class="info reveal" id="how">
       <div class="block-head"><p class="eyebrow"><span class="dot"></span>Method</p><h2>How it works</h2></div>
       <div class="steps">
-        <article class="glass step"><span class="step-n">01</span><h3>Discover</h3><p>Your usernames are checked on public platform APIs straight from your browser, and links in your profiles are followed one hop to find connected accounts.</p></article>
+        <article class="glass step"><span class="step-n">01</span><h3>Discover</h3><p>Your usernames are checked on public platform APIs straight from your browser. TraceMe reads your GitHub commits, README and linked accounts, follows links between profiles, and pivots on any email it finds (Gravatar, reused handles).</p></article>
         <article class="glass step"><span class="step-n">02</span><h3>Extract (NLP)</h3><p>Pattern matching and named-entity recognition pull out emails, phone numbers, locations, employers, schools, birth dates, family mentions, travel plans and sensitive topics.</p></article>
         <article class="glass step"><span class="step-n">03</span><h3>Match entities</h3><p>Accounts are compared on cross-links, shared emails and websites, name similarity, location and TF-IDF bio similarity, so an account that only shares your username isn't counted as yours.</p></article>
         <article class="glass step"><span class="step-n">04</span><h3>Classify risk</h3><p>Each exposure is rated by severity and mapped to threats: doxxing, identity theft, phishing, account takeover and stalking. Risky combinations of details are flagged too.</p></article>

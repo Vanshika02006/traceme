@@ -184,9 +184,9 @@ main, .footer, .topbar-wrap { position: relative; z-index: 1; }
 .btn-glass:hover { background: var(--accent-soft); }
 .btn-sm { padding: 11px 20px; }
 
-input[type="text"] { width: 100%; background: var(--field); border: 1px solid var(--field-border); color: var(--text-primary); border-radius: var(--radius-sm); padding: 11px 13px; font: var(--fs-base) var(--font); transition: border-color .2s, box-shadow .2s, background .3s; }
-input[type="text"]::placeholder { color: var(--text-muted); }
-input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+input[type="text"], input[type="password"] { width: 100%; background: var(--field); border: 1px solid var(--field-border); color: var(--text-primary); border-radius: var(--radius-sm); padding: 11px 13px; font: var(--fs-base) var(--font); transition: border-color .2s, box-shadow .2s, background .3s; }
+input::placeholder { color: var(--text-muted); }
+input[type="text"]:focus, input[type="password"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .field-label { display: block; font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
 .help { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: var(--space-2); margin-top: var(--space-2); }
@@ -469,3 +469,8 @@ input[type="text"]:focus { outline: none; border-color: var(--accent); box-shado
 .n-high { fill: var(--conf-high); }
 .n-mid { fill: var(--conf-mid); }
 .n-low { fill: var(--conf-low); }
+.coverage { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); display: grid; gap: 6px; font-size: var(--fs-sm); }
+.coverage-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.coverage p { margin: 0; }
+.token-label { margin-top: var(--space-3); }
+.limit-warn { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--text-primary); }

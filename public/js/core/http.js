@@ -16,6 +16,11 @@ export async function getJson(url, { timeout = 7000, headers = {}, notFoundStatu
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
     err.status = res.status;
+    // GitHub (and others) expose when the rate-limit window resets.
+    if (res.headers.get('x-ratelimit-remaining') === '0') {
+      const reset = Number(res.headers.get('x-ratelimit-reset'));
+      if (reset) err.rateLimitReset = new Date(reset * 1000);
+    }
     throw err;
   }
   return res.json();

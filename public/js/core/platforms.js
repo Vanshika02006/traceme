@@ -9,38 +9,101 @@ const toIso = (v) => {
   const d = typeof v === 'number' ? new Date(v < 1e12 ? v * 1000 : v) : new Date(v);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
+/** Markdown/HTML README -> plain text (keeps URLs). */
+export function stripMarkdown(md) {
+  return stripHtml(String(md)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\(([^)]+)\)/g, ' ')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 $2')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/[*_`|]/g, ' '))
+    .replace(/[ \t]+/g, ' ');
+}
 const clean = (arr) => [...new Set(arr.filter(Boolean).map((s) => String(s).trim()).filter(Boolean))];
 
 function profile(base) {
   return {
     displayName: null, bio: null, location: null, company: null, website: null,
-    emails: [], links: [], avatar: null, createdAt: null, stats: {}, activity: [], extraText: [],
+    emails: [], emailFields: {}, links: [], avatar: null, createdAt: null, stats: {}, activity: [], extraText: [],
+    extraEntities: [], readme: null, privacy: {},
     ...base,
     emails: clean(base.emails || []),
     links: clean(base.links || []),
   };
 }
 
-// Unauthenticated: GitHub allows 60 requests/hour per visitor IP.
-const githubHeaders = () => ({});
+// GitHub allows 60 unauthenticated requests/hour per IP. A visitor may supply their
+// own token (kept in memory for this tab only) to raise that to 5,000/hour.
+let githubToken = '';
+export const setGithubToken = (t) => { githubToken = /^[A-Za-z0-9_]{20,255}$/.test(String(t || '').trim()) ? String(t).trim() : ''; };
+const githubHeaders = () => (githubToken ? { Authorization: `Bearer ${githubToken}` } : {});
 
 export const PLATFORMS = {
   github: {
     name: 'GitHub',
     profileUrl: (u) => `https://github.com/${u}`,
     async fetch(u) {
-      const d = await getJson(`https://api.github.com/users/${enc(u)}`, { headers: githubHeaders() });
-      let activity = [];
-      try {
-        const events = await getJson(`https://api.github.com/users/${enc(u)}/events/public?per_page=100`, { headers: githubHeaders() });
-        activity = events.map((e) => e.created_at).filter(Boolean);
-      } catch { /* activity is optional */ }
+      const api = 'https://api.github.com';
+      const d = await getJson(`${api}/users/${enc(u)}`, { headers: githubHeaders() });
+      const login = d.login;
+      // Everything below is optional public data: a failure just means less detail.
+      const opt = (url) => getJson(url, { headers: githubHeaders() }).catch(() => null);
+      const [events, repos, social, orgs, readme] = await Promise.all([
+        opt(`${api}/users/${enc(login)}/events/public?per_page=100`),
+        opt(`${api}/users/${enc(login)}/repos?per_page=100&sort=pushed`),
+        opt(`${api}/users/${enc(login)}/social_accounts`),
+        opt(`${api}/users/${enc(login)}/orgs`),
+        opt(`${api}/repos/${enc(login)}/${enc(login)}/readme`),
+      ]);
+      const ownRepos = (repos || []).filter((r) => !r.fork);
+
+      // Commit metadata is the classic leak: author name + email on every public commit.
+      const commitRepos = ownRepos.slice(0, 3);
+      const commitLists = await Promise.all(commitRepos.map((r) => opt(`${api}/repos/${enc(login)}/${enc(r.name)}/commits?author=${enc(login)}&per_page=30`)));
+      const emailFields = {};
+      const extraEntities = [];
+      const commitDates = [];
+      const noreply = new Set();
+      commitLists.forEach((list, i) => {
+        for (const c of list || []) {
+          const a = c.commit?.author;
+          if (!a) continue;
+          if (a.date) commitDates.push(a.date);
+          const email = String(a.email || '').toLowerCase();
+          if (/noreply\.github\.com$/.test(email)) { noreply.add(email); continue; }
+          if (email && !emailFields[email]) emailFields[email] = { field: 'commit author email', snippet: `Author of commits in ${login}/${commitRepos[i].name}` };
+          if (a.name && !extraEntities.some((e) => e.value === a.name)) extraEntities.push({ type: 'commit_name', value: a.name, field: 'commit author name', snippet: `Author of commits in ${login}/${commitRepos[i].name}` });
+        }
+      });
+      if (d.email) emailFields[d.email.toLowerCase()] = { field: 'public email field', snippet: d.email };
+      for (const o of orgs || []) extraEntities.push({ type: 'organization', value: o.login, field: 'GitHub organisation', snippet: `Public member of github.com/${o.login}` });
+
+      let readmeText = '';
+      if (readme?.content) {
+        try {
+          const bytes = Uint8Array.from(atob(readme.content.replace(/\s/g, '')), (ch) => ch.charCodeAt(0));
+          readmeText = stripMarkdown(new TextDecoder().decode(bytes)).slice(0, 6000);
+        } catch { /* undecodable README */ }
+      }
+      const repoText = ownRepos.filter((r) => r.description).slice(0, 15).map((r) => `Repository ${r.name}: ${r.description}`);
+
       return profile({
-        username: d.login, url: d.html_url, displayName: d.name, bio: d.bio, location: d.location,
-        company: d.company, website: d.blog || null, emails: [d.email],
-        links: [d.blog, d.twitter_username && `https://x.com/${d.twitter_username}`],
+        username: login, url: d.html_url, displayName: d.name, bio: d.bio, location: d.location,
+        company: d.company, website: d.blog || null, emails: Object.keys(emailFields), emailFields,
+        links: [
+          d.blog, d.twitter_username && `https://x.com/${d.twitter_username}`,
+          ...(social || []).map((s) => s.url),
+          ...ownRepos.map((r) => r.homepage),
+          ...(readmeText.match(/https?:\/\/[^\s)>\]"']+/g) || []),
+        ],
         avatar: d.avatar_url, createdAt: toIso(d.created_at),
-        stats: { followers: d.followers, publicRepos: d.public_repos }, activity,
+        readme: readmeText || null,
+        extraText: repoText,
+        extraEntities,
+        privacy: { noreplyCommits: noreply.size > 0 },
+        stats: { followers: d.followers, publicRepos: d.public_repos, commitsScanned: commitDates.length },
+        activity: [...(events || []).map((e) => e.created_at), ...commitDates].filter(Boolean),
       });
     },
   },
@@ -234,7 +297,49 @@ export const DECLARED_ONLY = {
 };
 
 export function platformName(id) {
-  return PLATFORMS[id]?.name || DECLARED_ONLY[id]?.name || id;
+  return PLATFORMS[id]?.name || DECLARED_ONLY[id]?.name || (id === 'gravatar' ? 'Gravatar' : id);
+}
+
+function describeError(e) {
+  if (e.rateLimitReset) return `rate limit reached, try again after ${e.rateLimitReset.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (e.status === 429 || e.status === 403) return 'rate-limited or blocked';
+  if (e.name === 'TimeoutError') return 'timed out';
+  if (e.name === 'TypeError') return 'blocked by the browser or offline';
+  return e.message;
+}
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Gravatar is keyed by email (SHA-256 hash), not username. Never throws. */
+export async function lookupGravatar(email) {
+  const base = { platform: 'gravatar', platformName: 'Gravatar', query: email };
+  try {
+    const hash = await sha256Hex(email.trim().toLowerCase());
+    const d = await getJson(`https://api.gravatar.com/v3/profiles/${hash}`);
+    const handle = (d.profile_url || '').split('/').pop() || hash.slice(0, 12);
+    return {
+      ...base,
+      status: 'found',
+      profile: {
+        platform: 'gravatar', platformName: 'Gravatar',
+        ...profile({
+          username: handle, url: d.profile_url, displayName: d.display_name || null, bio: d.description || null,
+          location: d.location || null, company: d.company || null,
+          emails: [email], emailFields: { [email]: { field: 'Gravatar email hash', snippet: 'Profile registered to this email' } },
+          links: [...(d.verified_accounts || []).map((a) => a.url), ...(d.links || []).map((l) => l.url)],
+          avatar: d.avatar_url || null,
+          extraText: [d.job_title && `Job title: ${d.job_title}`, d.pronouns && `Pronouns: ${d.pronouns}`].filter(Boolean),
+          stats: { verifiedAccounts: (d.verified_accounts || []).length },
+        }),
+      },
+    };
+  } catch (e) {
+    if (e instanceof NotFound) return { ...base, status: 'not_found' };
+    return { ...base, status: 'unknown', reason: describeError(e), checkUrl: 'https://gravatar.com' };
+  }
 }
 
 /** Look up one username on one platform. Never throws. */
@@ -246,9 +351,6 @@ export async function lookup(platformId, username) {
     return { ...base, status: 'found', profile: { platform: platformId, platformName: p.name, ...data } };
   } catch (e) {
     if (e instanceof NotFound) return { ...base, status: 'not_found' };
-    const reason = e.status === 429 || e.status === 403 ? 'rate-limited or blocked'
-      : e.name === 'TimeoutError' ? 'timed out'
-      : e.name === 'TypeError' ? 'blocked by the browser or offline' : e.message;
-    return { ...base, status: 'unknown', reason, checkUrl: p.profileUrl(username) };
+    return { ...base, status: 'unknown', reason: describeError(e), checkUrl: p.profileUrl(username) };
   }
 }
