@@ -1,0 +1,49 @@
+const UA = 'TraceMe/1.0 (self-audit privacy tool)';
+
+export class NotFound extends Error {}
+
+/** GET JSON with a timeout. Returns parsed body, throws NotFound on 404/410, Error otherwise. */
+export async function getJson(url, { timeout = 7000, headers = {}, notFoundStatuses = [404, 410] } = {}) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': UA, Accept: 'application/json', ...headers },
+    signal: AbortSignal.timeout(timeout),
+    redirect: 'follow',
+  });
+  if (notFoundStatuses.includes(res.status)) throw new NotFound(`${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/** Run async tasks with a concurrency cap. */
+export async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+export function stripHtml(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>|<\/p>/gi, '\n')
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, ' $1 ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x2F;/g, '/')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TraceMe – Your Digital Footprint Investigator</title>
+  <meta name="description" content="Enter your public usernames or profile URLs to see your digital footprint, privacy exposure and potential risks.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="9" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M20.5 20.5 28 28" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M10 15.5c1-3 3-4.5 4-4.5s2.5 1 2.5 3-2 2.5-2 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span>TraceMe</span>
+    </a>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============ Search ============ -->
+    <section class="hero" id="search">
+      <div class="hero-copy">
+        <p class="eyebrow">Digital footprint investigator</p>
+        <h1>See what the internet knows about you</h1>
+        <p class="lede">Enter your own usernames or profile URLs. TraceMe checks public profiles across platforms, pulls out the personal details they reveal, works out which accounts can be linked to you, and explains the risks.</p>
+      </div>
+
+      <form id="scan-form" class="card form-card" novalidate>
+        <label class="field-label" for="input-entry">Usernames or profile URLs</label>
+        <div class="chip-input" id="chip-input">
+          <ul class="chips" id="chips" aria-live="polite"></ul>
+          <input id="input-entry" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="e.g. janedoe or https://github.com/janedoe" aria-describedby="input-help">
+        </div>
+        <p class="help" id="input-help">Press Enter or comma after each one. Up to <span id="max-inputs">5</span>.</p>
+
+        <details class="optional">
+          <summary>Optional: help us tell your accounts apart from someone else's</summary>
+          <div class="grid-2">
+            <div>
+              <label class="field-label" for="full-name">Your full name</label>
+              <input id="full-name" type="text" autocomplete="name" maxlength="100" placeholder="Jane Doe">
+            </div>
+            <div>
+              <label class="field-label" for="location">Your city or country</label>
+              <input id="location" type="text" maxlength="100" placeholder="Pune, India">
+            </div>
+          </div>
+          <p class="help">Used only to check which accounts with your username are really you. It is never stored or displayed.</p>
+        </details>
+
+        <label class="consent">
+          <input type="checkbox" id="consent">
+          <span>These are my own accounts, and I understand TraceMe only reads publicly available information.</span>
+        </label>
+
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit" id="scan-btn">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m13.5 13.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Investigate my footprint
+        </button>
+      </form>
+    </section>
+
+    <!-- ============ Scanning ============ -->
+    <section class="scanning" id="scanning" hidden aria-live="polite">
+      <div class="card scan-card">
+        <div class="radar" aria-hidden="true"><span></span></div>
+        <h2>Investigating your footprint…</h2>
+        <p class="muted" id="scan-status">Checking public profiles</p>
+        <ol class="pipeline">
+          <li data-step="0">Discovering accounts</li>
+          <li data-step="1">Following linked profiles</li>
+          <li data-step="2">Extracting entities (NLP)</li>
+          <li data-step="3">Matching identities</li>
+          <li data-step="4">Classifying risk</li>
+        </ol>
+        <ul class="platform-ticker" id="platform-ticker"></ul>
+      </div>
+    </section>
+
+    <!-- ============ Results ============ -->
+    <section class="results" id="results" hidden>
+      <div class="results-head">
+        <div>
+          <p class="eyebrow">Footprint report</p>
+          <h2 id="report-title">Your digital footprint</h2>
+          <p class="muted" id="report-meta"></p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost" id="btn-export" type="button">Download JSON</button>
+          <button class="btn btn-ghost" id="btn-print" type="button">Print / PDF</button>
+          <button class="btn btn-secondary" id="btn-new" type="button">New scan</button>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="Report sections">
+        <a href="#sec-overview">Overview</a>
+        <a href="#sec-findings">Risks</a>
+        <a href="#sec-accounts">Accounts</a>
+        <a href="#sec-entities">Exposed data</a>
+        <a href="#sec-graph">Identity graph</a>
+        <a href="#sec-activity">Activity</a>
+      </nav>
+
+      <section id="sec-overview" class="overview">
+        <div class="card score-card" id="score-card"></div>
+        <div class="stat-grid" id="stat-grid"></div>
+        <div class="card threats-card">
+          <h3>Threat vectors <span class="muted small">exposure score, 0–100</span></h3>
+          <div id="threat-chart" class="threat-chart"></div>
+        </div>
+      </section>
+
+      <section id="sec-findings" class="block">
+        <h3 class="block-title">Risk findings</h3>
+        <p class="muted block-sub">Ranked by severity. Each one explains the risk and what to do.</p>
+        <div id="findings"></div>
+        <details class="card review" id="review-wrap" hidden>
+          <summary><span id="review-count"></span></summary>
+          <p class="muted">These details come from accounts that share your username but don't clearly match you. They barely affect your score. If any of them are yours, they matter as much as the findings above.</p>
+          <div id="findings-unverified"></div>
+        </details>
+      </section>
+
+      <section id="sec-accounts" class="block">
+        <h3 class="block-title">Accounts found</h3>
+        <p class="muted block-sub">The match score shows how likely it is that the account is yours, based on cross-links, names, locations, websites and bio wording.</p>
+        <div class="account-grid" id="accounts"></div>
+        <div id="declared"></div>
+        <div id="other-checks"></div>
+      </section>
+
+      <section id="sec-entities" class="block">
+        <h3 class="block-title">Exposed personal data</h3>
+        <p class="muted block-sub">Entities extracted from profile fields and bios with pattern matching and named-entity recognition.</p>
+        <div class="card table-wrap"><table class="data-table" id="entities-table"></table></div>
+      </section>
+
+      <section id="sec-graph" class="block">
+        <h3 class="block-title">Identity graph</h3>
+        <p class="muted block-sub">How an investigator would link your accounts. Lines show matching evidence; thicker lines mean stronger evidence. Hover a line or account for details.</p>
+        <div class="card graph-card"><div id="graph"></div><div class="graph-legend" id="graph-legend"></div></div>
+      </section>
+
+      <section id="sec-activity" class="block">
+        <h3 class="block-title">Activity pattern</h3>
+        <p class="muted block-sub">Public activity by hour of day (UTC). Long quiet stretches usually mean sleep, which gives away a timezone.</p>
+        <div class="card" id="activity"></div>
+      </section>
+    </section>
+
+    <!-- ============ Info ============ -->
+    <section class="info" id="how">
+      <h2>How it works</h2>
+      <div class="steps">
+        <article class="card step"><span class="step-n">1</span><h3>Discover</h3><p>Your usernames are checked on 15 platforms through their official public APIs, and links in your profiles are followed one hop to find connected accounts.</p></article>
+        <article class="card step"><span class="step-n">2</span><h3>Extract (NLP)</h3><p>Pattern matching and named-entity recognition pull out emails, phone numbers, locations, employers, schools, birth dates, family mentions, travel plans and sensitive topics.</p></article>
+        <article class="card step"><span class="step-n">3</span><h3>Match entities</h3><p>Accounts are compared on cross-links, shared emails and websites, name similarity, location and TF-IDF bio similarity, so an account that only shares your username isn't counted as yours.</p></article>
+        <article class="card step"><span class="step-n">4</span><h3>Classify risk</h3><p>Each exposure is rated by severity and mapped to threats: doxxing, identity theft, phishing, account takeover and stalking. Risky combinations of details are flagged too.</p></article>
+      </div>
+    </section>
+
+    <section class="info" id="privacy">
+      <h2>Privacy</h2>
+      <div class="card privacy">
+        <ul>
+          <li><strong>Public data only.</strong> TraceMe never logs in, scrapes behind login walls, or touches private data. Instagram, LinkedIn, X and similar sites are listed when you add them but not fetched.</li>
+          <li><strong>Nothing is stored.</strong> Scans run in memory and the report exists only in your browser. Close the tab and it's gone.</li>
+          <li><strong>For self-assessment.</strong> Use TraceMe on your own accounts. Looking up other people without their consent may be illegal where you live.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>TraceMe – Your Digital Footprint Investigator. Results are estimates based on public data and may be incomplete.</p>
+  </footer>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>
