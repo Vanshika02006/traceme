@@ -1,18 +1,58 @@
 // TraceMe front end — no framework, no inline styles/scripts (strict CSP).
 // The whole scan runs in the browser (static hosting on GitHub Pages).
 import { PLATFORMS as PLATFORM_DEFS } from './core/platforms.js';
-import { MAX_INPUTS as MAX } from './core/analyze.js';
+import { MAX_INPUTS } from './core/analyze.js';
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const safeUrl = (u) => { try { const x = new URL(u, location.href); return /^https?:$/.test(x.protocol) ? x.href : null; } catch { return null; } };
 const pct = (x) => `${Math.round(x * 100)}%`;
-const SVG_NS = 'http://www.w3.org/2000/svg';
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-let MAX_INPUTS = 5;
-let PLATFORMS = [];
+const PLATFORMS = Object.entries(PLATFORM_DEFS).map(([id, p]) => ({ id, name: p.name }));
 let lastReport = null;
+let bg = null;       // Three.js background controller
+let graph3d = null;  // Three.js identity graph controller
+let graphView = '3d';
 const inputs = [];
+
+$('#max-inputs').textContent = MAX_INPUTS;
+$('#fact-platforms').textContent = PLATFORMS.length;
+
+// ---------------- theme ----------------
+const root = document.documentElement;
+function applyTheme(theme, persist) {
+  root.dataset.theme = theme;
+  $('#theme-color').setAttribute('content', theme === 'light' ? '#eef1f7' : '#07080b');
+  $('#theme-toggle').setAttribute('aria-label', `Switch to ${theme === 'light' ? 'dark' : 'light'} mode`);
+  if (persist) { try { localStorage.setItem('traceme-theme', theme); } catch { /* ignore */ } }
+  bg?.setTheme(theme);
+  graph3d?.setTheme();
+}
+applyTheme(root.dataset.theme || 'dark', false);
+$('#theme-toggle').addEventListener('click', () => {
+  const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+  if (document.startViewTransition && !reducedMotion) document.startViewTransition(() => applyTheme(next, true));
+  else applyTheme(next, true);
+});
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+  let stored = null;
+  try { stored = localStorage.getItem('traceme-theme'); } catch { /* ignore */ }
+  if (!stored) applyTheme(e.matches ? 'light' : 'dark', false);
+});
+
+// ---------------- Three.js background (progressive enhancement) ----------------
+import('./scene.js')
+  .then((m) => { bg = m.initBackground($('#bg-canvas')); bg.setTheme(root.dataset.theme); })
+  .catch((err) => { console.warn('3D background unavailable', err); $('#bg-canvas').hidden = true; });
+
+// ---------------- reveal on scroll ----------------
+const revealer = 'IntersectionObserver' in window
+  ? new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); revealer.unobserve(en.target); } }), { rootMargin: '0px 0px -8% 0px' })
+  : null;
+const observeReveals = (scope = document) => $$('.reveal:not(.in)', scope).forEach((el) => (revealer ? revealer.observe(el) : el.classList.add('in')));
+observeReveals();
 
 // ---------------- status vocabulary (icon + label, never color alone) ----------------
 const ICONS = {
@@ -25,7 +65,6 @@ const ICONS = {
 const LEVEL_STATUS = { Low: 'good', Moderate: 'warning', High: 'serious', Critical: 'critical' };
 const SEV_STATUS = { critical: 'critical', high: 'serious', medium: 'warning', low: 'neutral' };
 const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
-const STATUS_COLOR = { good: '#0ca30c', warning: '#fab219', serious: '#ec835a', critical: '#d03b3b', neutral: '#898781' };
 const statusChip = (status, label, cls = '') => `<span class="status status-${status} ${cls}">${ICONS[status]}${esc(label)}</span>`;
 
 const TYPE_LABEL = {
@@ -40,15 +79,8 @@ const tip = $('#tooltip');
 const tips = new Map();
 let tipSeq = 0;
 const registerTip = (html) => { const id = `t${++tipSeq}`; tips.set(id, html); return id; };
-document.addEventListener('pointerover', (e) => {
-  const t = e.target.closest?.('[data-tip]');
-  if (!t) return;
-  tip.innerHTML = tips.get(t.dataset.tip) || '';
-  tip.hidden = false;
-  moveTip(e);
-});
-document.addEventListener('pointermove', (e) => { if (!tip.hidden) moveTip(e); });
-document.addEventListener('pointerout', (e) => { if (e.target.closest?.('[data-tip]') && !e.relatedTarget?.closest?.('[data-tip]')) tip.hidden = true; });
+function showTip(html, e) { tip.innerHTML = html; tip.hidden = false; moveTip(e); }
+function hideTip() { tip.hidden = true; }
 function moveTip(e) {
   const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
   let x = e.clientX + pad, y = e.clientY + pad;
@@ -57,6 +89,12 @@ function moveTip(e) {
   tip.style.left = `${Math.max(8, x)}px`;
   tip.style.top = `${Math.max(8, y)}px`;
 }
+document.addEventListener('pointerover', (e) => {
+  const t = e.target.closest?.('[data-tip]');
+  if (t) showTip(tips.get(t.dataset.tip) || '', e);
+});
+document.addEventListener('pointermove', (e) => { if (!tip.hidden && e.target.closest?.('[data-tip]')) moveTip(e); });
+document.addEventListener('pointerout', (e) => { if (e.target.closest?.('[data-tip]') && !e.relatedTarget?.closest?.('[data-tip]')) hideTip(); });
 
 // ---------------- input chips ----------------
 const entry = $('#input-entry');
@@ -68,14 +106,15 @@ function addInput(raw) {
   if (inputs.length >= MAX_INPUTS) return showError(`You can add up to ${MAX_INPUTS} usernames or URLs.`);
   if (inputs.some((x) => x.toLowerCase() === v.toLowerCase())) return;
   inputs.push(v);
+  showError('');
   renderChips();
 }
 function renderChips() {
   $('#chips').innerHTML = inputs.map((v, i) => `<li class="chip"><span class="chip-kind">${looksLikeUrl(v) ? 'URL' : '@'}</span><span class="chip-text" title="${esc(v)}">${esc(v)}</span><button type="button" data-remove="${i}" aria-label="Remove ${esc(v)}">×</button></li>`).join('');
-  entry.placeholder = inputs.length ? 'Add another…' : 'e.g. janedoe or https://github.com/janedoe';
+  entry.placeholder = inputs.length ? 'Add another…' : 'janedoe or github.com/janedoe';
 }
 entry.addEventListener('keydown', (e) => {
-  if ((e.key === 'Enter' || e.key === ',' || e.key === 'Tab') && entry.value.trim()) {
+  if ((e.key === 'Enter' || e.key === ',' || (e.key === 'Tab' && entry.value.trim())) && entry.value.trim()) {
     e.preventDefault();
     addInput(entry.value);
     entry.value = '';
@@ -86,10 +125,7 @@ entry.addEventListener('keydown', (e) => {
 });
 entry.addEventListener('paste', (e) => {
   const text = e.clipboardData.getData('text');
-  if (/[\n,\s]/.test(text.trim())) {
-    e.preventDefault();
-    text.split(/[\n,\s]+/).forEach(addInput);
-  }
+  if (/[\n,\s]/.test(text.trim())) { e.preventDefault(); text.split(/[\n,\s]+/).forEach(addInput); }
 });
 entry.addEventListener('blur', () => { if (entry.value.trim()) { addInput(entry.value); entry.value = ''; } });
 $('#chip-input').addEventListener('click', (e) => {
@@ -97,31 +133,62 @@ $('#chip-input').addEventListener('click', (e) => {
   if (rm) { inputs.splice(+rm.dataset.remove, 1); renderChips(); }
   entry.focus();
 });
-
 function showError(msg) { const el = $('#form-error'); el.textContent = msg; el.hidden = !msg; }
 
-// ---------------- scan flow ----------------
-PLATFORMS = Object.entries(PLATFORM_DEFS).map(([id, p]) => ({ id, name: p.name }));
-MAX_INPUTS = MAX;
-$('#max-inputs').textContent = MAX_INPUTS;
-$('#platform-ticker').innerHTML = PLATFORMS.map((p) => `<li>${esc(p.name)}</li>`).join('');
-
-let scanTimers = [];
-function startScanAnimation() {
-  const steps = $$('.pipeline li');
-  steps.forEach((s) => s.classList.remove('active', 'done'));
-  let i = 0;
-  steps[0].classList.add('active');
-  scanTimers.push(setInterval(() => {
-    if (i < steps.length - 1) { steps[i].classList.replace('active', 'done'); steps[++i].classList.add('active'); }
-  }, 1400));
-  const chips = $$('#platform-ticker li');
-  scanTimers.push(setInterval(() => {
-    chips.forEach((c) => c.classList.remove('lit'));
-    for (let k = 0; k < 3; k++) chips[Math.floor(Math.random() * chips.length)]?.classList.add('lit');
-  }, 350));
+// ---------------- views ----------------
+function showView(name) {
+  const swap = () => {
+    $('#search').hidden = name !== 'search';
+    $$('.info').forEach((s) => { s.hidden = name !== 'search'; });
+    $('#scanning').hidden = name !== 'scan';
+    $('#results').hidden = name !== 'results';
+    document.body.classList.toggle('mode-results', name === 'results');
+  };
+  if (document.startViewTransition && !reducedMotion) document.startViewTransition(swap);
+  else swap();
+  bg?.setMode(name === 'scan' ? 'scan' : name === 'results' ? 'results' : 'idle');
+  scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
 }
-function stopScanAnimation() { scanTimers.forEach(clearInterval); scanTimers = []; }
+
+// ---------------- scan flow ----------------
+const STATUS_GLYPH = { checking: '', found: '✓', not_found: '–', unknown: '!' };
+const STATUS_RANK = { checking: 0, not_found: 1, unknown: 2, found: 3 };
+
+function resetScanUI() {
+  $('#platform-status').innerHTML = PLATFORMS.map((p) => `<li class="checking" data-platform="${p.id}"><span class="ps-icon"></span><span>${esc(p.name)}</span></li>`).join('');
+  $$('.pipeline li').forEach((li) => li.classList.remove('active', 'done'));
+  setProgress(0);
+  $('#scan-status').textContent = 'Checking public profiles';
+}
+function setProgress(p) {
+  const bar = $('#scan-progress');
+  bar.firstElementChild.style.width = `${Math.round(p * 100)}%`;
+  bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+}
+const STAGES = ['discover', 'links', 'extract', 'match', 'risk'];
+const STAGE_TEXT = { discover: 'Checking public profiles', links: 'Following links between your profiles', extract: 'Extracting personal details with NLP', match: 'Matching identities across accounts', risk: 'Classifying risk' };
+function onProgress(ev) {
+  const i = STAGES.indexOf(ev.stage);
+  $$('.pipeline li').forEach((li, k) => { li.classList.toggle('done', k < i); li.classList.toggle('active', k === i); });
+  $('#scan-status').textContent = STAGE_TEXT[ev.stage] || '';
+  if (ev.stage === 'discover' && ev.total) setProgress(0.75 * (ev.done / ev.total));
+  else if (ev.stage === 'links') setProgress(0.75 + 0.1 * (ev.total ? ev.done / ev.total : 1));
+  else if (i >= 2) setProgress(0.85 + 0.05 * (i - 1));
+  const r = ev.result;
+  if (r) {
+    let li = $(`#platform-status [data-platform="${r.platform}"]`);
+    if (!li) {
+      $('#platform-status').insertAdjacentHTML('beforeend', `<li class="checking" data-platform="${esc(r.platform)}"><span class="ps-icon"></span><span>${esc(r.platformName)}</span></li>`);
+      li = $(`#platform-status [data-platform="${r.platform}"]`);
+    }
+    const current = [...li.classList].find((c) => c in STATUS_RANK) || 'checking';
+    if (STATUS_RANK[r.status] > STATUS_RANK[current] || current === 'checking') {
+      li.className = r.status;
+      li.querySelector('.ps-icon').textContent = STATUS_GLYPH[r.status];
+      if (r.status === 'found') bg?.ping();
+    }
+  }
+}
 
 $('#scan-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -132,40 +199,27 @@ $('#scan-form').addEventListener('submit', async (e) => {
 
   const btn = $('#scan-btn');
   btn.disabled = true;
-  $('#search').hidden = true;
-  $$('.info').forEach((s) => { s.hidden = true; });
-  $('#scanning').hidden = false;
-  scrollTo({ top: 0 });
-  startScanAnimation();
+  resetScanUI();
+  showView('scan');
   try {
     const { analyze } = await import('./core/analyze.js');
-    const data = await analyze({ inputs, fullName: $('#full-name').value, location: $('#location').value });
+    const data = await analyze({ inputs, fullName: $('#full-name').value, location: $('#location').value }, { onProgress });
+    setProgress(1);
     lastReport = data;
+    await new Promise((r) => setTimeout(r, reducedMotion ? 0 : 450));
+    showView('results');
     render(data);
-    $('#scanning').hidden = true;
-    $('#results').hidden = false;
   } catch (err) {
-    $('#scanning').hidden = true;
-    $('#search').hidden = false;
-    $$('.info').forEach((s) => { s.hidden = false; });
-    showError(err.message);
+    console.error(err);
+    showView('search');
+    showError(`The scan failed: ${err.message}`);
   } finally {
-    stopScanAnimation();
     btn.disabled = false;
   }
 });
 
-$('#btn-new').addEventListener('click', () => {
-  $('#results').hidden = true;
-  $('#search').hidden = false;
-  $$('.info').forEach((s) => { s.hidden = false; });
-  scrollTo({ top: 0, behavior: 'smooth' });
-  entry.focus();
-});
-$('#btn-print').addEventListener('click', () => {
-  $$('#results details').forEach((d) => { d.open = true; });
-  print();
-});
+$('#btn-new').addEventListener('click', () => { showView('search'); entry.focus(); });
+$('#btn-print').addEventListener('click', () => { $$('#results details').forEach((d) => { d.open = true; }); print(); });
 $('#btn-export').addEventListener('click', () => {
   if (!lastReport) return;
   const blob = new Blob([JSON.stringify(lastReport, null, 2)], { type: 'application/json' });
@@ -174,10 +228,16 @@ $('#btn-export').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 
+// active tab while scrolling the report
+const tabObserver = new IntersectionObserver((entries) => {
+  entries.forEach((en) => { if (en.isIntersecting) $$('.tabs a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#${en.target.id}`)); });
+}, { rootMargin: '-40% 0px -55% 0px' });
+['sec-overview', 'sec-findings', 'sec-accounts', 'sec-entities', 'sec-graph', 'sec-activity'].forEach((id) => tabObserver.observe($(`#${id}`)));
+
 // ---------------- rendering ----------------
 function render(r) {
   tips.clear();
-  const conf = Object.fromEntries(r.profiles.map((p) => [p.platform, Math.max(p.match.score, 0)]));
+  const conf = {};
   r.profiles.forEach((p) => { conf[p.platform] = Math.max(conf[p.platform] ?? 0, p.match.score); });
 
   $('#report-title').textContent = `Footprint for ${r.query.usernames.map((u) => `@${u}`).join(', ')}`;
@@ -190,8 +250,21 @@ function render(r) {
   renderFindings(r.risk.findings);
   renderAccounts(r);
   renderEntities(r.entities, conf);
-  renderGraph(r.graph);
+  renderGraph(r);
   renderActivity(r.activity);
+  $$('#results .reveal').forEach((el) => el.classList.remove('in'));
+  requestAnimationFrame(() => observeReveals($('#results')));
+}
+
+function countUp(el, to, ms = 1100) {
+  if (reducedMotion) { el.textContent = to; return; }
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / ms);
+    el.textContent = Math.round(to * (1 - (1 - k) ** 3));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 function renderScore(r) {
@@ -205,25 +278,28 @@ function renderScore(r) {
   }[level];
   $('#score-card').innerHTML = `
     <h3>Privacy exposure score</h3>
-    <div><div class="hero-number">${score}<small> / 100</small></div></div>
+    <div class="hero-number"><span id="score-num">0</span><small> / 100</small></div>
     <div>${statusChip(status, `${level} exposure`, 'status-lg')}</div>
     <div><div class="meter" role="img" aria-label="Score ${score} out of 100"><div class="meter-fill"></div></div>
-      <div class="meter-scale"><span>0 Low</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div>
-    <p class="score-summary">${esc(blurb)} <span class="muted">${counts.critical} critical · ${counts.high} high · ${counts.medium} medium · ${counts.low} low</span></p>`;
+      <div class="meter-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div>
+    <p class="score-summary">${esc(blurb)}</p>
+    <p class="score-summary muted">${counts.critical} critical · ${counts.high} high · ${counts.medium} medium · ${counts.low} low</p>`;
+  countUp($('#score-num'), score);
   const fill = $('#score-card .meter-fill');
-  fill.style.width = `${Math.max(2, score)}%`;
-  fill.style.background = STATUS_COLOR[status];
+  fill.style.background = `var(--${status})`;
+  requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = `${Math.max(2, score)}%`; }));
 }
 
 function renderStats(r) {
   const s = r.summary;
   const tiles = [
-    [s.accountsFound, 'Accounts found', `of ${s.lookups} lookups`],
-    [s.likelyYou, 'Confirmed or likely yours', `${s.accountsFound - s.likelyYou} need review`],
-    [s.entities, 'Personal details exposed', 'extracted by NLP'],
-    [s.declaredAccounts, 'Linked social accounts', 'not fetched (login walls)'],
+    [s.accountsFound, 'Accounts found', `from ${s.lookups} lookups`],
+    [s.likelyYou, 'Likely yours', `${s.accountsFound - s.likelyYou} need review`],
+    [s.entities, 'Details exposed', 'extracted by NLP'],
+    [s.declaredAccounts, 'Linked socials', 'not fetched'],
   ];
-  $('#stat-grid').innerHTML = tiles.map(([v, l, n]) => `<div class="stat"><div class="stat-value">${v}</div><div class="stat-label">${esc(l)}</div><div class="stat-note">${esc(n)}</div></div>`).join('');
+  $('#stat-grid').innerHTML = tiles.map(([v, l, n]) => `<div class="glass stat reveal"><div class="stat-value" data-count="${v}">0</div><div class="stat-label">${esc(l)}</div><div class="stat-note">${esc(n)}</div></div>`).join('');
+  $$('#stat-grid [data-count]').forEach((el) => countUp(el, +el.dataset.count, 900));
 }
 
 /** Bar path with square baseline end and 4px rounded data end. */
@@ -240,7 +316,7 @@ function vbarPath(x, yBase, w, h, r = 4) {
 }
 
 function renderThreats(threats) {
-  const W = 640, rowH = 36, labelW = 210, valueW = 112, barW = W - labelW - valueW, barH = 10;
+  const W = 640, rowH = 38, labelW = 210, valueW = 112, barW = W - labelW - valueW, barH = 10;
   const H = threats.length * rowH;
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Threat vector scores">`;
   threats.forEach((t, i) => {
@@ -258,16 +334,15 @@ function renderThreats(threats) {
 }
 
 const platformLabel = (id) => lastReport?.profiles.find((p) => p.platform === id)?.platformName || id;
+const THREAT_NAMES = { doxxing: 'Doxxing', identity_theft: 'Identity theft', phishing: 'Phishing', account_takeover: 'Account takeover', stalking: 'Stalking' };
 
 function findingCard(f) {
-  const status = SEV_STATUS[f.severity];
   const ev = f.evidence.length
     ? `<details><summary>Evidence (${f.evidence.length})</summary><ul class="evidence">${f.evidence.map((e) => `<li><span class="ev-src">${esc(platformLabel(e.platform))}</span> · ${esc(e.field)}: ${esc(e.snippet || e.value)}</li>`).join('')}</ul></details>`
     : '';
-  const threatNames = { doxxing: 'Doxxing', identity_theft: 'Identity theft', phishing: 'Phishing', account_takeover: 'Account takeover', stalking: 'Stalking' };
-  return `<article class="finding sev-${f.severity}">
-    <div class="finding-head">${statusChip(status, SEV_LABEL[f.severity])}<h4>${esc(f.title)}</h4>
-      <div class="threat-tags">${f.threats.map((t) => `<span class="tag">${esc(threatNames[t] || t)}</span>`).join('')}</div></div>
+  return `<article class="glass finding sev-${f.severity}">
+    <div class="finding-head">${statusChip(SEV_STATUS[f.severity], SEV_LABEL[f.severity])}<h4>${esc(f.title)}</h4>
+      <div class="threat-tags">${f.threats.map((t) => `<span class="tag">${esc(THREAT_NAMES[t] || t)}</span>`).join('')}</div></div>
     <p>${esc(f.detail)}</p>
     <div class="rec"><strong>What to do:</strong> ${esc(f.recommendation)}</div>
     ${ev}
@@ -277,7 +352,7 @@ function findingCard(f) {
 function renderFindings(findings) {
   const verified = findings.filter((f) => !f.unverified);
   const unverified = findings.filter((f) => f.unverified);
-  $('#findings').innerHTML = verified.length ? verified.map(findingCard).join('') : `<div class="card empty">${ICONS.good.replace('<svg', '<svg width="22" height="22"')}<p>No significant exposure found on accounts that match you.</p></div>`;
+  $('#findings').innerHTML = verified.length ? verified.map(findingCard).join('') : `<div class="glass empty">${statusChip('good', 'All clear')}<p>No significant exposure found on accounts that match you.</p></div>`;
   $('#review-wrap').hidden = !unverified.length;
   $('#review-count').textContent = `Needs your review: ${unverified.length} finding${unverified.length === 1 ? '' : 's'} from accounts that may not be yours`;
   $('#findings-unverified').innerHTML = unverified.map(findingCard).join('');
@@ -296,7 +371,7 @@ function renderAccounts(r) {
       p.via && `via ${p.via}`,
       ...Object.entries(p.stats || {}).filter(([, v]) => typeof v === 'number').slice(0, 2).map(([k, v]) => `${v.toLocaleString()} ${k.replace(/([A-Z])/g, ' $1').toLowerCase()}`),
     ].filter(Boolean);
-    return `<article class="account ${s < 0.45 ? 'dim' : ''}">
+    return `<article class="glass account ${s < 0.45 ? 'dim' : ''}">
       <div class="acct-top">
         ${avatar ? `<img class="avatar" src="${esc(avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="avatar">${esc((p.platformName || '?')[0])}</div>`}
         <div class="acct-id"><div class="acct-platform">${esc(p.platformName)}</div>
@@ -311,14 +386,14 @@ function renderAccounts(r) {
         <details><summary>Why?</summary><ul>${p.match.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>
       </div>
     </article>`;
-  }).join('') : '<div class="card empty">No public accounts were found for these usernames.</div>';
-  $$('#accounts [data-w]').forEach((el) => { el.style.width = `${el.dataset.w}%`; });
+  }).join('') : '<div class="glass empty">No public accounts were found for these usernames.</div>';
+  requestAnimationFrame(() => requestAnimationFrame(() => $$('#accounts [data-w]').forEach((el) => { el.style.width = `${el.dataset.w}%`; })));
   $$('#accounts img.avatar').forEach((img) => img.addEventListener('error', () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'avatar', textContent: '?' })); }));
 
   $('#declared').innerHTML = r.declared.length ? `<div class="sub-list"><h4>Social accounts linked to you (not fetched)</h4><ul class="pill-list">${r.declared.map((d) => {
     const u = safeUrl(d.url);
     return `<li>${esc(d.platformName)}: ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">@${esc(d.username)}</a>` : `@${esc(d.username)}`} <span class="muted">· ${esc(d.via)}</span></li>`;
-  }).join('')}</ul><p class="help">These platforms need a login or prohibit automated access, so their content isn't analysed. The fact that they can be linked to your other accounts still counts as exposure.</p></div>` : '';
+  }).join('')}</ul><p class="help">These platforms need a login or block browser requests, so their content isn't analysed. The fact that they can be linked to your other accounts still counts as exposure.</p></div>` : '';
 
   const unknown = r.unknown.length ? `<div class="sub-list"><h4>Couldn't check automatically (${r.unknown.length})</h4><ul class="pill-list">${r.unknown.map((u) => {
     const link = safeUrl(u.checkUrl);
@@ -338,18 +413,50 @@ function renderEntities(entities, conf) {
   if (!entities.length) { $('#entities-table').innerHTML = '<tbody><tr><td class="empty">No personal details were extracted.</td></tr></tbody>'; return; }
   const sorted = [...entities].sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type));
   $('#entities-table').innerHTML = `<thead><tr><th>Type</th><th>Value</th><th>Found on</th><th>Context</th></tr></thead><tbody>${sorted.map((e) => {
-    const type = TYPE_LABEL[e.type] || e.type;
-    const sub = e.subtype && !['obfuscated'].includes(e.subtype) ? ` <span class="muted small">(${esc(e.subtype)})</span>` : e.subtype === 'obfuscated' ? ' <span class="muted small">(obfuscated)</span>' : '';
-    const src = e.sources.map((s) => `<span class="src-badge ${(conf[s.platform] ?? 0) < 0.45 ? 'unv' : ''}" title="${(conf[s.platform] ?? 0) < 0.45 ? 'Account may not be yours' : ''}">${esc(platformLabel(s.platform))}</span>`).join('');
+    const sub = e.subtype ? ` <span class="muted small">(${esc(e.subtype)})</span>` : '';
+    const src = e.sources.map((s) => {
+      const unv = (conf[s.platform] ?? 0) < 0.45;
+      return `<span class="src-badge ${unv ? 'unv' : ''}" title="${unv ? 'Account may not be yours' : ''}">${esc(platformLabel(s.platform))}</span>`;
+    }).join('');
     const ctx = e.sources[0]?.snippet && e.sources[0].snippet !== e.value ? highlight(e.sources[0].snippet, e.value) : `<span class="muted">${esc(e.sources[0]?.field || '')}</span>`;
-    return `<tr><td class="type-cell">${esc(type)}${sub}</td><td class="val">${esc(e.value)}</td><td>${src}</td><td class="ctx">${ctx}</td></tr>`;
+    return `<tr><td class="type-cell">${esc(TYPE_LABEL[e.type] || e.type)}${sub}</td><td class="val">${esc(e.value)}</td><td>${src}</td><td class="ctx">${ctx}</td></tr>`;
   }).join('')}</tbody>`;
 }
 
-function renderGraph(graph) {
+// ---------------- identity graph (3D with 2D fallback) ----------------
+const tipNode = (n, p) => `<div class="tt-title">${esc(n.label)} · @${esc(n.username)}</div><div class="tt-row">${esc(p?.match.label || '')} (${pct(n.confidence)})</div><ul>${(p?.match.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+const tipEdge = (e) => `<div class="tt-title">${Math.round(e.score * 100)}% match</div><ul>${e.evidence.map((x) => `<li>${esc(x)}</li>`).join('')}${e.penalties.map((x) => `<li>⚠ ${esc(x)}</li>`).join('')}</ul>`;
+
+function renderGraph(r) {
+  const graph = r.graph;
+  $('#graph-legend').innerHTML = `
+    <span><i class="swatch s-high"></i>Likely you (≥75%)</span>
+    <span><i class="swatch s-mid"></i>Possibly you (45–74%)</span>
+    <span><i class="swatch s-low"></i>Uncertain (&lt;45%)</span>
+    <span><i class="swatch-line"></i>Strong link</span>
+    <span><i class="swatch-line weak"></i>Weak link</span>`;
+  renderGraph2D(graph);
+  graph3d?.dispose();
+  graph3d = null;
+  if (!graph.nodes.length) { setGraphView('2d', false); return; }
+  setGraphView(graphView, false);
+  import('./graph3d.js')
+    .then((m) => {
+      graph3d = m.createGraph3D($('#graph3d'), graph, { profiles: r.profiles, tipNode, tipEdge, showTip, hideTip });
+    })
+    .catch((err) => { console.warn('3D graph unavailable, using 2D', err); setGraphView('2d', false); $('.seg').hidden = true; });
+}
+function setGraphView(view, remember = true) {
+  if (remember) graphView = view;
+  $('#graph3d').hidden = view !== '3d';
+  $('#graph').hidden = view !== '2d';
+  $$('.seg-btn').forEach((b) => { const on = b.dataset.view === view; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+}
+$$('.seg-btn').forEach((b) => b.addEventListener('click', () => setGraphView(b.dataset.view)));
+
+function renderGraph2D(graph) {
   const nodes = [...graph.nodes].sort((a, b) => b.confidence - a.confidence);
-  if (!nodes.length) { $('#graph').innerHTML = '<p class="empty">No accounts to link.</p>'; $('#graph-legend').innerHTML = ''; return; }
-  // Order nodes by cluster so linked accounts sit next to each other on the ring.
+  if (!nodes.length) { $('#graph').innerHTML = '<p class="empty">No accounts to link.</p>'; return; }
   const order = graph.clusters.flat();
   nodes.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   const W = 820, H = nodes.length > 12 ? 600 : 500, cx = W / 2, cy = H / 2 + 4;
@@ -360,48 +467,37 @@ function renderGraph(graph) {
     const a = -Math.PI / 2 + (2 * Math.PI * i) / nodes.length;
     pos[n.id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a };
   });
-  const fillFor = (c) => (c >= 0.75 ? '#3987e5' : c >= 0.45 ? '#1c5cab' : '#383835');
+  const tierCls = (c) => (c >= 0.75 ? 'n-high' : c >= 0.45 ? 'n-mid' : 'n-low');
   let edges = '', hits = '';
   graph.edges.forEach((e) => {
     const a = pos[e.source], b = pos[e.target];
     if (!a || !b) return;
     const strong = e.score >= 0.5;
-    const id = registerTip(`<div class="tt-title">${Math.round(e.score * 100)}% match</div><ul>${e.evidence.map((x) => `<li>${esc(x)}</li>`).join('')}${e.penalties.map((x) => `<li>⚠ ${esc(x)}</li>`).join('')}</ul>`);
-    edges += `<line class="edge ${strong ? '' : 'edge-weak'}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-width="${strong ? (1.5 + e.score * 4).toFixed(1) : 1.5}" stroke-opacity="${strong ? 0.35 + e.score * 0.6 : 0.7}"/>`;
+    const id = registerTip(tipEdge(e));
+    edges += `<line class="edge ${strong ? '' : 'edge-weak'}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-width="${strong ? (1.5 + e.score * 4).toFixed(1) : 1.5}" stroke-opacity="${strong ? (0.35 + e.score * 0.6).toFixed(2) : 0.7}"/>`;
     hits += `<line class="edge-hit" data-tip="${id}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
   });
   const lookup = Object.fromEntries((lastReport?.profiles || []).map((p) => [p.id, p]));
   let nodeSvg = '';
   nodes.forEach((n) => {
     const { x, y, a } = pos[n.id];
-    const p = lookup[n.id];
-    const id = registerTip(`<div class="tt-title">${esc(n.label)} · @${esc(n.username)}</div><div class="tt-row">${esc(p?.match.label || '')} (${pct(n.confidence)})</div><ul>${(p?.match.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`);
-    // Labels sit radially outside the ring so they never cross edges in the middle.
+    const id = registerTip(tipNode(n, lookup[n.id]));
     const single = nodes.length === 1;
     const cos = single ? 0 : Math.cos(a), sin = single ? 1 : Math.sin(a);
     const anchor = cos > 0.35 ? 'start' : cos < -0.35 ? 'end' : 'middle';
     const lx = x + cos * (r + 8);
     const ly = anchor === 'middle' ? (sin >= 0 ? y + r + 16 : y - r - 22) : y + sin * (r + 6) - 2;
     nodeSvg += `<g data-tip="${id}">
-      <circle class="node-ring" cx="${x}" cy="${y}" r="${r}" fill="${fillFor(n.confidence)}"/>
+      <circle class="node-ring ${tierCls(n.confidence)}" cx="${x}" cy="${y}" r="${r}"/>
       <text class="node-pct ${n.confidence < 0.45 ? 'dark' : ''}" x="${x}" y="${y + 4}" text-anchor="middle">${Math.round(n.confidence * 100)}</text>
       <text class="node-label" x="${lx}" y="${ly}" text-anchor="${anchor}">${esc(n.label.replace(/ \(.*\)$/, ''))}</text>
       <text class="node-sub" x="${lx}" y="${ly + 14}" text-anchor="${anchor}">@${esc(n.username.length > 18 ? `${n.username.slice(0, 17)}…` : n.username)}</text>
     </g>`;
   });
   $('#graph').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Identity graph of ${nodes.length} accounts">${edges}${hits}${nodeSvg}</svg>`;
-  $('#graph-legend').innerHTML = `
-    <span><i class="swatch swatch-likely"></i>Likely you (≥75)</span>
-    <span><i class="swatch swatch-possible"></i>Possibly you (45–74)</span>
-    <span><i class="swatch swatch-uncertain"></i>Uncertain (&lt;45)</span>
-    <span><i class="swatch-line"></i>Strong link</span>
-    <span><i class="swatch-line weak"></i>Weak link</span>
-    <span class="muted">Numbers are match scores (%)</span>`;
-  $('.swatch-likely').style.background = '#3987e5';
-  $('.swatch-possible').style.background = '#1c5cab';
-  $('.swatch-uncertain').style.background = '#383835';
 }
 
+// ---------------- activity chart ----------------
 function renderActivity(act) {
   const box = $('#activity');
   if (!act || !act.events) {
@@ -429,10 +525,9 @@ function renderActivity(act) {
   if (inf && inf.quietShare < 0.08) {
     const [s] = inf.quietWindowUtc;
     for (const seg of s + 6 <= 24 ? [[s, 6]] : [[s, 24 - s], [0, s + 6 - 24]]) {
-      svg += `<rect class="quiet" x="${padL + seg[0] * colW}" y="${padT}" width="${seg[1] * colW}" height="${plotH}"/>`;
+      svg += `<rect class="quiet" x="${padL + seg[0] * colW}" y="${padT}" width="${seg[1] * colW}" height="${plotH}" rx="6"/>`;
     }
-    const labelX = padL + ((s + 3) % 24) * colW;
-    svg += `<text class="quiet-label" x="${labelX}" y="${padT - 5}" text-anchor="middle">Likely sleep</text>`;
+    svg += `<text class="quiet-label" x="${padL + ((s + 3) % 24) * colW}" y="${padT - 5}" text-anchor="middle">Likely sleep</text>`;
   }
   for (let k = 0; k <= 4; k++) {
     const v = (niceMax / 4) * k, yy = y(v);

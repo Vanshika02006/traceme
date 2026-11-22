@@ -1,45 +1,74 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>TraceMe – Your Digital Footprint Investigator</title>
-  <meta name="description" content="Enter your public usernames or profile URLs to see your digital footprint, privacy exposure and potential risks.">
+  <meta name="description" content="Enter your public usernames or profile URLs to see your digital footprint, privacy exposure and potential risks. Runs entirely in your browser.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#07080b" id="theme-color">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'sha256-6HgX19uhVrl+9xGmxi8xQlCipAdVXtxEFNLKHaWPKKo='; style-src 'self'; img-src 'self' https: data:; connect-src 'self' https://api.github.com https://gitlab.com https://hacker-news.firebaseio.com https://dev.to https://keybase.io https://api.chess.com https://lichess.org https://codeforces.com https://mastodon.social https://public.api.bsky.app https://registry.npmjs.org https://en.wikipedia.org; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta property="og:title" content="TraceMe – Your Digital Footprint Investigator">
+  <meta property="og:description" content="See what the internet knows about you: public accounts, exposed personal data, linkability and risk.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="modulepreload" href="js/app.js">
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/","compromise":"https://cdn.jsdelivr.net/npm/compromise@14.20.0/+esm"}}</script>
+  <script src="js/theme.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="./">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="9" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M20.5 20.5 28 28" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M10 15.5c1-3 3-4.5 4-4.5s2.5 1 2.5 3-2 2.5-2 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <span>TraceMe</span>
-    </a>
-    <nav class="topnav" aria-label="Sections">
-      <a href="#how">How it works</a>
-      <a href="#privacy">Privacy</a>
-    </nav>
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar-wrap">
+    <div class="topbar glass">
+      <a class="brand" href="./">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="9" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M20.5 20.5 28 28" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><circle cx="14" cy="14" r="2.6" fill="currentColor"/></svg>
+        <span>TraceMe</span>
+      </a>
+      <nav class="topnav" aria-label="Site">
+        <a href="#how">How it works</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/Vanshika02006/traceme" rel="noopener">GitHub</a>
+      </nav>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light mode">
+        <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
   </header>
 
-  <main>
+  <main class="container">
     <!-- ============ Search ============ -->
     <section class="hero" id="search">
       <div class="hero-copy">
-        <p class="eyebrow">Digital footprint investigator</p>
-        <h1>See what the internet knows about you</h1>
+        <p class="eyebrow"><span class="dot"></span>Digital footprint investigator</p>
+        <h1>See what the internet <span class="grad">knows about you</span></h1>
         <p class="lede">Enter your own usernames or profile URLs. TraceMe checks public profiles across platforms, pulls out the personal details they reveal, works out which accounts can be linked to you, and explains the risks.</p>
+        <ul class="hero-facts">
+          <li><strong id="fact-platforms">12</strong><span>platforms checked</span></li>
+          <li><strong>0</strong><span>bytes stored</span></li>
+          <li><strong>100%</strong><span>in your browser</span></li>
+        </ul>
       </div>
 
-      <form id="scan-form" class="card form-card" novalidate>
+      <form id="scan-form" class="glass glass-strong form-card" novalidate>
+        <div class="form-head">
+          <h2>Start an investigation</h2>
+          <p class="muted">Usernames or profile links, up to <span id="max-inputs">5</span>.</p>
+        </div>
         <label class="field-label" for="input-entry">Usernames or profile URLs</label>
         <div class="chip-input" id="chip-input">
           <ul class="chips" id="chips" aria-live="polite"></ul>
-          <input id="input-entry" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="e.g. janedoe or https://github.com/janedoe" aria-describedby="input-help">
+          <input id="input-entry" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+                 placeholder="janedoe or github.com/janedoe" aria-describedby="input-help">
         </div>
-        <p class="help" id="input-help">Press Enter or comma after each one. Up to <span id="max-inputs">5</span>.</p>
+        <p class="help" id="input-help">Press Enter or comma after each one.</p>
 
         <details class="optional">
-          <summary>Optional: help us tell your accounts apart from someone else's</summary>
+          <summary>Optional: help tell your accounts apart from someone else's</summary>
           <div class="grid-2">
             <div>
               <label class="field-label" for="full-name">Your full name</label>
@@ -50,7 +79,7 @@
               <input id="location" type="text" maxlength="100" placeholder="Pune, India">
             </div>
           </div>
-          <p class="help">Used only to check which accounts with your username are really you. It is never stored or displayed.</p>
+          <p class="help">Only used on this device to check which accounts are really you.</p>
         </details>
 
         <label class="consent">
@@ -61,25 +90,30 @@
         <p class="form-error" id="form-error" role="alert" hidden></p>
         <button class="btn btn-primary" type="submit" id="scan-btn">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m13.5 13.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          Investigate my footprint
+          <span>Investigate my footprint</span>
         </button>
       </form>
     </section>
 
     <!-- ============ Scanning ============ -->
     <section class="scanning" id="scanning" hidden aria-live="polite">
-      <div class="card scan-card">
-        <div class="radar" aria-hidden="true"><span></span></div>
-        <h2>Investigating your footprint…</h2>
-        <p class="muted" id="scan-status">Checking public profiles</p>
+      <div class="glass glass-strong scan-card">
+        <div class="scan-head">
+          <div class="radar" aria-hidden="true"><span></span><i></i></div>
+          <div>
+            <h2>Investigating your footprint…</h2>
+            <p class="muted" id="scan-status">Checking public profiles</p>
+          </div>
+        </div>
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="scan-progress"><i></i></div>
         <ol class="pipeline">
-          <li data-step="0">Discovering accounts</li>
-          <li data-step="1">Following linked profiles</li>
-          <li data-step="2">Extracting entities (NLP)</li>
-          <li data-step="3">Matching identities</li>
-          <li data-step="4">Classifying risk</li>
+          <li data-stage="discover">Discover accounts</li>
+          <li data-stage="links">Follow links</li>
+          <li data-stage="extract">Extract entities</li>
+          <li data-stage="match">Match identities</li>
+          <li data-stage="risk">Classify risk</li>
         </ol>
-        <ul class="platform-ticker" id="platform-ticker"></ul>
+        <ul class="platform-status" id="platform-status"></ul>
       </div>
     </section>
 
@@ -87,18 +121,18 @@
     <section class="results" id="results" hidden>
       <div class="results-head">
         <div>
-          <p class="eyebrow">Footprint report</p>
+          <p class="eyebrow"><span class="dot"></span>Footprint report</p>
           <h2 id="report-title">Your digital footprint</h2>
           <p class="muted" id="report-meta"></p>
         </div>
         <div class="actions">
-          <button class="btn btn-ghost" id="btn-export" type="button">Download JSON</button>
-          <button class="btn btn-ghost" id="btn-print" type="button">Print / PDF</button>
-          <button class="btn btn-secondary" id="btn-new" type="button">New scan</button>
+          <button class="btn btn-glass" id="btn-export" type="button">Download JSON</button>
+          <button class="btn btn-glass" id="btn-print" type="button">Print / PDF</button>
+          <button class="btn btn-primary btn-sm" id="btn-new" type="button">New scan</button>
         </div>
       </div>
 
-      <nav class="tabs" aria-label="Report sections">
+      <nav class="tabs glass" aria-label="Report sections">
         <a href="#sec-overview">Overview</a>
         <a href="#sec-findings">Risks</a>
         <a href="#sec-accounts">Accounts</a>
@@ -108,81 +142,83 @@
       </nav>
 
       <section id="sec-overview" class="overview">
-        <div class="card score-card" id="score-card"></div>
+        <div class="glass score-card reveal" id="score-card"></div>
         <div class="stat-grid" id="stat-grid"></div>
-        <div class="card threats-card">
+        <div class="glass threats-card reveal">
           <h3>Threat vectors <span class="muted small">exposure score, 0–100</span></h3>
           <div id="threat-chart" class="threat-chart"></div>
         </div>
       </section>
 
-      <section id="sec-findings" class="block">
-        <h3 class="block-title">Risk findings</h3>
-        <p class="muted block-sub">Ranked by severity. Each one explains the risk and what to do.</p>
-        <div id="findings"></div>
-        <details class="card review" id="review-wrap" hidden>
+      <section id="sec-findings" class="block reveal">
+        <div class="block-head"><h3 class="block-title">Risk findings</h3><p class="muted block-sub">Ranked by severity. Each one explains the risk and what to do.</p></div>
+        <div id="findings" class="findings"></div>
+        <details class="glass review" id="review-wrap" hidden>
           <summary><span id="review-count"></span></summary>
           <p class="muted">These details come from accounts that share your username but don't clearly match you. They barely affect your score. If any of them are yours, they matter as much as the findings above.</p>
-          <div id="findings-unverified"></div>
+          <div id="findings-unverified" class="findings"></div>
         </details>
       </section>
 
-      <section id="sec-accounts" class="block">
-        <h3 class="block-title">Accounts found</h3>
-        <p class="muted block-sub">The match score shows how likely it is that the account is yours, based on cross-links, names, locations, websites and bio wording.</p>
+      <section id="sec-accounts" class="block reveal">
+        <div class="block-head"><h3 class="block-title">Accounts found</h3><p class="muted block-sub">The match score shows how likely it is that the account is yours, based on cross-links, names, locations, websites and bio wording.</p></div>
         <div class="account-grid" id="accounts"></div>
         <div id="declared"></div>
         <div id="other-checks"></div>
       </section>
 
-      <section id="sec-entities" class="block">
-        <h3 class="block-title">Exposed personal data</h3>
-        <p class="muted block-sub">Entities extracted from profile fields and bios with pattern matching and named-entity recognition.</p>
-        <div class="card table-wrap"><table class="data-table" id="entities-table"></table></div>
+      <section id="sec-entities" class="block reveal">
+        <div class="block-head"><h3 class="block-title">Exposed personal data</h3><p class="muted block-sub">Entities extracted from profile fields and bios with pattern matching and named-entity recognition.</p></div>
+        <div class="glass table-wrap"><table class="data-table" id="entities-table"></table></div>
       </section>
 
-      <section id="sec-graph" class="block">
-        <h3 class="block-title">Identity graph</h3>
-        <p class="muted block-sub">How an investigator would link your accounts. Lines show matching evidence; thicker lines mean stronger evidence. Hover a line or account for details.</p>
-        <div class="card graph-card"><div id="graph"></div><div class="graph-legend" id="graph-legend"></div></div>
+      <section id="sec-graph" class="block reveal">
+        <div class="block-head row">
+          <div><h3 class="block-title">Identity graph</h3><p class="muted block-sub">How an investigator would link your accounts. Drag to rotate; hover an account or link for the evidence.</p></div>
+          <div class="seg" role="group" aria-label="Graph view">
+            <button type="button" class="seg-btn active" data-view="3d" aria-pressed="true">3D</button>
+            <button type="button" class="seg-btn" data-view="2d" aria-pressed="false">2D</button>
+          </div>
+        </div>
+        <div class="glass graph-card">
+          <div id="graph3d" class="graph3d"></div>
+          <div id="graph" hidden></div>
+          <div class="graph-legend" id="graph-legend"></div>
+        </div>
       </section>
 
-      <section id="sec-activity" class="block">
-        <h3 class="block-title">Activity pattern</h3>
-        <p class="muted block-sub">Public activity by hour of day (UTC). Long quiet stretches usually mean sleep, which gives away a timezone.</p>
-        <div class="card" id="activity"></div>
+      <section id="sec-activity" class="block reveal">
+        <div class="block-head"><h3 class="block-title">Activity pattern</h3><p class="muted block-sub">Public activity by hour of day (UTC). Long quiet stretches usually mean sleep, which gives away a timezone.</p></div>
+        <div class="glass" id="activity"></div>
       </section>
     </section>
 
     <!-- ============ Info ============ -->
-    <section class="info" id="how">
-      <h2>How it works</h2>
+    <section class="info reveal" id="how">
+      <div class="block-head"><p class="eyebrow"><span class="dot"></span>Method</p><h2>How it works</h2></div>
       <div class="steps">
-        <article class="card step"><span class="step-n">1</span><h3>Discover</h3><p>Your usernames are checked on 15 platforms through their official public APIs, and links in your profiles are followed one hop to find connected accounts.</p></article>
-        <article class="card step"><span class="step-n">2</span><h3>Extract (NLP)</h3><p>Pattern matching and named-entity recognition pull out emails, phone numbers, locations, employers, schools, birth dates, family mentions, travel plans and sensitive topics.</p></article>
-        <article class="card step"><span class="step-n">3</span><h3>Match entities</h3><p>Accounts are compared on cross-links, shared emails and websites, name similarity, location and TF-IDF bio similarity, so an account that only shares your username isn't counted as yours.</p></article>
-        <article class="card step"><span class="step-n">4</span><h3>Classify risk</h3><p>Each exposure is rated by severity and mapped to threats: doxxing, identity theft, phishing, account takeover and stalking. Risky combinations of details are flagged too.</p></article>
+        <article class="glass step"><span class="step-n">01</span><h3>Discover</h3><p>Your usernames are checked on public platform APIs straight from your browser, and links in your profiles are followed one hop to find connected accounts.</p></article>
+        <article class="glass step"><span class="step-n">02</span><h3>Extract (NLP)</h3><p>Pattern matching and named-entity recognition pull out emails, phone numbers, locations, employers, schools, birth dates, family mentions, travel plans and sensitive topics.</p></article>
+        <article class="glass step"><span class="step-n">03</span><h3>Match entities</h3><p>Accounts are compared on cross-links, shared emails and websites, name similarity, location and TF-IDF bio similarity, so an account that only shares your username isn't counted as yours.</p></article>
+        <article class="glass step"><span class="step-n">04</span><h3>Classify risk</h3><p>Each exposure is rated by severity and mapped to threats: doxxing, identity theft, phishing, account takeover and stalking. Risky combinations of details are flagged too.</p></article>
       </div>
     </section>
 
-    <section class="info" id="privacy">
-      <h2>Privacy</h2>
-      <div class="card privacy">
-        <ul>
-          <li><strong>Public data only.</strong> TraceMe never logs in, scrapes behind login walls, or touches private data. Instagram, LinkedIn, X and similar sites are listed when you add them but not fetched.</li>
-          <li><strong>Nothing is stored.</strong> Scans run in memory and the report exists only in your browser. Close the tab and it's gone.</li>
-          <li><strong>For self-assessment.</strong> Use TraceMe on your own accounts. Looking up other people without their consent may be illegal where you live.</li>
-        </ul>
+    <section class="info reveal" id="privacy">
+      <div class="block-head"><p class="eyebrow"><span class="dot"></span>Trust</p><h2>Privacy</h2></div>
+      <div class="glass privacy">
+        <div><h3>Public data only</h3><p>TraceMe never logs in or reads private data. Instagram, LinkedIn, X and similar sites are listed when you add them but never fetched.</p></div>
+        <div><h3>Nothing leaves your device</h3><p>There is no TraceMe server. Your browser talks directly to the public APIs, and the report exists only in this tab.</p></div>
+        <div><h3>For self-assessment</h3><p>Use TraceMe on your own accounts. Looking up other people without their consent may be illegal where you live.</p></div>
       </div>
     </section>
   </main>
 
-  <footer class="footer">
+  <footer class="footer container">
     <p>TraceMe – Your Digital Footprint Investigator. Results are estimates based on public data and may be incomplete.</p>
   </footer>
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
-  <script type="importmap">{"imports":{"compromise":"https://cdn.jsdelivr.net/npm/compromise@14.20.0/+esm"}}</script>
   <script src="js/app.js" type="module"></script>
 </body>
 </html>
